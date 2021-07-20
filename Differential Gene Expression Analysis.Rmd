@@ -1,0 +1,122 @@
+---
+title: "Gene Expression Analysis"
+author: "Giacomo"
+date: "7/19/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(edgeR)
+library(devtools)
+library(Rsubread)
+library(ggplot2)
+library(rtracklayer)
+library(dplyr)
+counts.data <- read_tsv("allcounts.tsv")
+colnames(counts.data) <- str_replace(colnames(counts.data), fixed(".ReadsPerGene.out.tab"),"")
+colnames(counts.data) <- str_replace(colnames(counts.data), fixed("Sample"), ("Gene_ID"))
+counts.data <- counts.data %>%
+  filter(Gene_ID!="N_unmapped",Gene_ID!="N_multimapping", Gene_ID!="N_noFeature", Gene_ID!="N_ambiguous" )
+counts.data
+  
+```
+The sample refers to the f01_etc and the evm is the gene id of each individual. Basically, evm.model.scaffold_1603.163 (specific gene) in sample f01_S55_L001 has 0 reads. 
+```{r}
+M_K <- counts.data[,c(1, 61:75, 86:100)]
+M_K <- M_K[rowSums(counts.data[,-1] > 10) >= 3,]
+colnames(M_K) <- str_replace(colnames(M_K), fixed("k"), ("stin"))
+colnames(M_K) <- str_replace(colnames(M_K), fixed("m"), ("stto-bh"))
+Light <- M_K[, c(1:6, 17:21)]
+colnames(Light) <- str_replace(colnames(Light), fixed("S"), ("L"))
+Dark <- M_K[, c(1, 7:16, 22:31)]
+colnames(Dark) <- str_replace(colnames(Dark), fixed("S"), ("D"))
+M_K2 <- merge(Light, Dark)
+M_K3 <- M_K2[,c(1:6, 12:21, 7:11, 22:31)]
+M_K3
+```
+
+```{r}
+vis.counts <- M_K[,-1]
+vis.counts <-vis.counts[1:1000,]
+cor(vis.counts)
+```
+
+```{r}
+sample.description <- tibble(sample=colnames(M_K3)[-1])
+sample.description
+sample_seperation <- sample.description %>%
+  mutate(SP = str_extract(sample, "stin|stto-bh"),
+         trt = str_extract(sample, "L|D"),
+         group = str_c(SP, trt, sep = "_"))
+
+sample_seperation <- sample_seperation %>%
+  mutate(SP=factor(SP),
+         trt=factor(trt, levels = c("D","L")))
+sample_seperation
+```
+
+```{r}
+counts.matrix <- M_K3 %>%
+  select(-Gene_ID)%>%
+  as.matrix()
+rownames(counts.matrix) <- M_K3$Gene_ID
+dge.data <- DGEList(counts=counts.matrix,
+                    group=sample_seperation$group)
+
+dim(dge.data)
+dge.data <- calcNormFactors(dge.data, method = ("TMM"))
+dge.data$samples
+plotMDS(dge.data, method = "bcv")
+```
+
+```{r}
+counts.data.normal <- cpm(dge.data)
+counts.data.normal.log <- cpm(dge.data, log = TRUE)
+counts.data.log <- log2(M_K3[,-1] + 1)
+boxplot(counts.data.log)
+boxplot(counts.data.normal.log)
+```
+```{r}
+
+design <- model.matrix(~SP+trt, data = sample_seperation)
+rownames(design) <- sample_seperation$sample
+design
+dge.data <- estimateGLMTrendedDisp(dge.data, design)
+dge.data <- estimateGLMTagwiseDisp(dge.data, design)
+plotBCV(dge.data)
+```
+```{r}
+fit <- glmFit(dge.data, design)
+design
+trtL.lrt <- glmLRT(fit, coef = "trtL")
+topTags(trtL.lrt)
+summary(decideTestsDGE(trtL.lrt, p.value =0.01))
+
+DEgene.trtL <- topTags(trtL.lrt,n = Inf,p.value = 0.01)$table
+write.csv(DEgene.trtL,"../DEgenes.trtL.csv")
+DEgene.trtL.all <- topTags(trtL.lrt,n = Inf, p.value = 1)$table
+write.csv(DEgene.trtL.all,"../DEgenes.trtL.all.csv")
+
+plotDE <- function(genes, dge, sample_seperation) {
+  require(ggplot2)
+  tmp.data <- t(log2(cpm(dge[genes,])+1))
+  tmp.data <- tmp.data %>%
+    as.data.frame() %>%
+    rownames_to_column("sample") %>%
+    left_join(sample_seperation,by="sample")
+  tmp.data <- tmp.data %>%
+    pivot_longer(cols=starts_with("evm"), values_to = "log2_cpm", names_to = "gene")
+  pl <- ggplot(tmp.data,aes(x= SP,y=log2_cpm,fill= trt))
+  pl <- pl + facet_wrap( ~ gene)
+  pl <- pl + ylab("log2(cpm)") + xlab("treatment")
+  pl <- pl + geom_boxplot()
+  pl + theme(axis.text.x  = element_text(angle=45, vjust=1,hjust=1))
+}
+plotDE (rownames(DEgene.trtL)[1:9],dge.data, sample_seperation)
+plotDE ("evm.model.scaffold_34.25987", dge.data, sample_seperation)
+```
+
+Ex. Bottom right. That particular gene is expressed more highly in light in both of the species. Also would you want to look at the group so trt combined with individual species to see that a particular gene in a particular species is expressed more highly in that species than the other? That, that gene is expressed more highly in light in both species. 
+evm.modelscaffold_34.25987 is expressed 5*x higher in light
+a negative number would suggest that the gene expressed `blank` times more in the dark. 
