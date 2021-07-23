@@ -25,26 +25,18 @@ counts.data
 The sample refers to the f01_etc and the evm is the gene id of each individual. Basically, evm.model.scaffold_1603.163 (specific gene) in sample f01_S55_L001 has 0 reads. 
 ```{r}
 M_K <- counts.data[,c(1, 61:70, 86:95)]
-M_K
 M_K <- M_K[rowSums(counts.data[,-1] > 10) >= 3,]
 colnames(M_K) <- str_replace(colnames(M_K), fixed("k"), ("stin"))
 colnames(M_K) <- str_replace(colnames(M_K), fixed("m"), ("stto-bh"))
 Light <- M_K[, c(1:6, 12:16)]
 colnames(Light) <- str_replace(colnames(Light), fixed("S"), ("L"))
 Dark <- M_K[, c(1, 7, 8, 10:11, 17:21)]
-Dark
 colnames(Dark) <- str_replace(colnames(Dark), fixed("S"), ("D"))
 M_K2 <- merge(Light, Dark)
-M_K2
 M_K3 <- M_K2[,c(1:6, 12:16, 7, 8, 10:11, 17:20)]
-M_K3
+head(M_K3)
 ```
 
-```{r}
-vis.counts <- M_K[,-1]
-vis.counts <-vis.counts[1:1000,]
-cor(vis.counts)
-```
 
 ```{r}
 sample.description <- tibble(sample=colnames(M_K3)[-1])
@@ -175,12 +167,6 @@ Each species for the poarticular gene has a different interaction with light.
 What this is then showing us is that both genotype and treatment are having an impact on the expression levels. 
 Treatment and genotype dictate expression levels.
 
-```{r}
-counts.data <- read_tsv("allcounts.tsv")
-counts.data
-ggplot(data = counts.data, mapping = aes(y = colsum)) +
-  geom_col()
-```
 
 This is the start of the interaction GO analysis
 
@@ -193,83 +179,337 @@ library(Biostrings)
 ```
 
 ```{r}
-SPtrt <- DEgene.sptrt %>%
+negative_values <- DEgene.sptrt %>%
+  filter(logFC < 0)
+negative_values
+
+positive_values <- DEgene.sptrt %>%
+  filter(logFC > 0)
+positive_values
+```
+
+```{r}
+SPtrtneg <- negative_values %>%
   rownames_to_column()
-colnames(SPtrt) <- str_replace(colnames(SPtrt), fixed("rowname"), "GeneID")
+colnames(SPtrtneg) <- str_replace(colnames(SPtrtneg), fixed("rowname"), "GeneID")
 
 file.info <- read_tsv("Sdiv2Athal.blastp_20210714.out", col_names = FALSE)
 colnames(file.info)[1] <- "GeneID"
 colnames(file.info)[2] <- "GOTerms"
 file.info
 uniq.blast.results <- file.info %>%
-    group_by(X12, GeneID) %>%
+    group_by(GeneID) %>%
     filter(rank(dplyr::desc(X12), ties.method = "first") == 1) 
 uniq.blast.results
 
 
-GODEgene.trt <- inner_join(SPtrt, file.info)
-GODEgene.trt 
+GODEgene.trtSP <- inner_join(SPtrtneg, uniq.blast.results)
+GODEgene.trtSP
 ```
 
 ```{r}
-go.terms <- read_tsv("Sdiv_GoTerms.tsv")
-go.terms
+go.terms.neg <- read_tsv("Sdiv_GoTerms.tsv")
+go.terms.neg
 
-expressed.genes <- M_K3
-colnames(expressed.genes) <- str_replace(colnames(expressed.genes), fixed("Gene_ID"), "GeneID")
-expressed.genes
+expressed.genes.neg <- M_K3[, 1, drop = F ]
+expressed.genes.neg
 
 
-txdb <- makeTxDbFromGFF("streptanthus_jamg.gene_structures_post_PASA_updates.97994.gff3")
+txdb.neg <- makeTxDbFromGFF("streptanthus_jamg.gene_structures_post_PASA_updates.97994.gff3")
 # then collect the exons per gene id
-exons.list.per.gene <- exonsBy(txdb,by="gene")
+exons.list.per.gene.neg <- exonsBy(txdb.neg,by="gene") 
 # then for each gene, reduce all the exons to a set of non overlapping exons, calculate their lengths (widths) and sum then
-exonic.gene.sizes <- sum(width(reduce(exons.list.per.gene)))
-genething <- data.frame(as.data.frame(exonic.gene.sizes))
-gene.length <- genething %>%
+exonic.gene.sizes.neg <- sum(width(reduce(exons.list.per.gene.neg)))
+genething.neg <- data.frame(as.data.frame(exonic.gene.sizes.neg))
+gene.length.neg <- genething.neg %>%
   rownames_to_column()
-colnames(gene.length) <- str_replace(colnames(gene.length), fixed("rowname"), ("GeneID"))
-colnames(gene.length) <- str_replace(colnames(gene.length), fixed("exonic.gene.sizes"), ("Length"))
-gene.length <- gene.length %>%
-  mutate(GeneID=str_replace(GeneID, "TU", "model"))
-gene.length
+colnames(gene.length.neg) <- str_replace(colnames(gene.length.neg), fixed("rowname"), ("Gene_ID"))
+colnames(gene.length.neg) <- str_replace(colnames(gene.length.neg), fixed("exonic.gene.sizes.neg"), ("Length"))
+gene.length.neg <- gene.length.neg %>%
+  mutate(Gene_ID=str_replace(Gene_ID, "TU", "model"))
 
 
-
-gene.lengths.vector <- gene.length$Length[gene.length$GeneID %in% expressed.genes$GeneID]
-gene.lengths.vector
-names(gene.lengths.vector) <- gene.length$GeneID[gene.length$GeneID %in% expressed.genes$GeneID]
-head(gene.lengths.vector)
-expressed.genes.match <- expressed.genes[expressed.genes$GeneID %in% names(gene.lengths.vector),]
-expressed.genes.match
+gene.lengths.vector.neg <- gene.length.neg$Length[gene.length.neg$Gene_ID %in% expressed.genes.neg$Gene_ID]
+gene.lengths.vector.neg
+names(gene.lengths.vector.neg) <- gene.length.neg$Gene_ID[gene.length.neg$Gene_ID %in% expressed.genes.neg$Gene_ID]
+head(gene.lengths.vector.neg)
+expressed.genes.match.neg <- expressed.genes.neg[expressed.genes.neg$Gene_ID %in% names(gene.lengths.vector.neg),, drop = F]
+expressed.genes.match.neg
 ```
 ```{r}
-go.list <- strsplit(go.terms$GOs, split=",")
-names(go.list) <- go.terms$GeneID
-head(go.list)
-```
-```{r}
-DE.trt <- expressed.genes.match$GeneID %in% SPtrt.all$GeneID
-names(DE.trt) <- expressed.genes.match$GeneID
-head(DE.trt)
-DE.trt <- as.numeric(DE.trt) 
-head(DE.trt)
-sum(DE.trt) 
+go.list.neg <- strsplit(go.terms.neg$GOs, split=", ")
+names(go.list.neg) <- go.terms.neg$GeneID
+head(go.list.neg)
 ```
 
 ```{r}
-nullp.result <- nullp(DEgenes = DE.trt,bias.data = gene.lengths.vector)
+DE.sptrt.neg <- expressed.genes.match.neg$Gene_ID %in% SPtrtneg$GeneID
+names(DE.sptrt.neg) <- expressed.genes.match.neg$Gene_ID
+head(DE.sptrt.neg)
+DE.sptrt.neg <- as.numeric(DE.sptrt.neg) 
+DE.sptrt.neg
+sum(DE.sptrt.neg) 
+```
 
-rownames(nullp.result) <- names(gene.lengths.vector) #because of a bug in nullp()
-GO.out <- goseq(pwf = nullp.result, gene2cat = go.list,test.cats=("GO:BP"))
+```{r}
+nullp.result.neg <- nullp(DEgenes = DE.sptrt.neg,bias.data = gene.lengths.vector.neg)
+
+rownames(nullp.result.neg) <- names(gene.lengths.vector.neg) #because of a bug in nullp()
+GO.out.neg <- goseq(pwf = nullp.result.neg, gene2cat = go.list.neg,test.cats=("GO:BP"))
 
 
-GO.out[GO.out$over_represented_pvalue < 0.05,]
-GO.out
+GO.out.neg[GO.out.neg$over_represented_pvalue < 0.05,]
+
 ```
 ```{r}
-write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="GO_terms3.txt", quote = FALSE,col.names = FALSE)
+write.table(GO.out.neg[GO.out.neg$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="GO_termsnegative3.txt", quote = FALSE,col.names = FALSE)
 
 ```
 
-This is the end of the interaction GO analysis
+This is the end of the negative interaction GO analysis
+
+This is the beggining of the positive ingeraction GO analysis
+
+```{r}
+SPtrtpos <- positive_values %>%
+  rownames_to_column()
+colnames(SPtrtpos) <- str_replace(colnames(SPtrtpos), fixed("rowname"), "GeneID")
+
+file.info.pos.trtsp <- read_tsv("Sdiv2Athal.blastp_20210714.out", col_names = FALSE)
+colnames(file.info.pos.trtsp)[1] <- "GeneID"
+colnames(file.info.pos.trtsp)[2] <- "GOTerms"
+file.info.pos.trtsp
+uniq.blast.results.pos.trtsp <- file.info.pos.trtsp %>%
+    group_by(GeneID) %>%
+    filter(rank(dplyr::desc(X12), ties.method = "first") == 1) 
+uniq.blast.results.pos.trtsp
+
+
+GODEgene.pos.trtSP <- inner_join(SPtrtpos, uniq.blast.results.pos.trtsp)
+GODEgene.pos.trtSP
+```
+```{r}
+go.terms.pos.trtsp <- read_tsv("Sdiv_GoTerms.tsv")
+go.terms.pos.trtsp
+
+expressed.genes.pos.trtsp <- M_K3[, 1, drop = F ]
+expressed.genes.pos.trtsp
+
+
+txdb.pos.trtsp <- makeTxDbFromGFF("streptanthus_jamg.gene_structures_post_PASA_updates.97994.gff3")
+# then collect the exons per gene id
+exons.list.per.gene.pos.trtsp <- exonsBy(txdb.pos.trtsp,by="gene")
+# then for each gene, reduce all the exons to a set of non overlapping exons, calculate their lengths (widths) and sum then
+exonic.gene.sizes.pos.trtsp <- sum(width(reduce(exons.list.per.gene.pos.trtsp)))
+genething.pos.trtsp <- data.frame(as.data.frame(exonic.gene.sizes.pos.trtsp))
+gene.length.pos.trtsp <- genething.pos.trtsp %>%
+  rownames_to_column()
+colnames(gene.length.pos.trtsp) <- str_replace(colnames(gene.length.pos.trtsp), fixed("rowname"), ("Gene_ID"))
+colnames(gene.length.pos.trtsp) <- str_replace(colnames(gene.length.pos.trtsp), fixed("exonic.gene.sizes.neg"), ("Length"))
+gene.length.pos.trtsp <- gene.length.pos.trtsp %>%
+  mutate(Gene_ID=str_replace(Gene_ID, "TU", "model"))
+gene.length.pos.trtsp
+
+
+gene.lengths.vector.pos.trtsp <- gene.length.pos.trtsp$exonic.gene.sizes.pos.trtsp[gene.length.pos.trtsp$Gene_ID %in% expressed.genes.pos.trtsp$Gene_ID]
+gene.lengths.vector.pos.trtsp
+names(gene.lengths.vector.pos.trtsp) <- gene.length.pos.trtsp$Gene_ID[gene.length.pos.trtsp$Gene_ID %in% expressed.genes.pos.trtsp$Gene_ID]
+head(gene.lengths.vector.pos.trtsp)
+expressed.genes.match.pos.trtsp <- expressed.genes.pos.trtsp[expressed.genes.pos.trtsp$Gene_ID %in% names(gene.lengths.vector.pos.trtsp),, drop = F]
+expressed.genes.match.pos.trtsp
+```
+
+```{r}
+go.list.pos.trtsp <- strsplit(go.terms.pos.trtsp$GOs, split=", ")
+names(go.list.pos.trtsp) <- go.terms.pos.trtsp$GeneID
+head(go.list.pos.trtsp)
+```
+ 
+```{r}
+DE.sptrt.pos <- expressed.genes.match.pos.trtsp$Gene_ID %in% SPtrtpos$GeneID
+names(DE.sptrt.pos) <- expressed.genes.match.pos.trtsp$Gene_ID
+head(DE.sptrt.pos)
+DE.sptrt.pos <- as.numeric(DE.sptrt.pos) 
+DE.sptrt.pos
+sum(DE.sptrt.pos) 
+```
+ 
+```{r}
+nullp.result.pos.trtsp <- nullp(DEgenes = DE.sptrt.pos,bias.data = gene.lengths.vector.pos.trtsp)
+
+rownames(nullp.result.pos.trtsp) <- names(gene.lengths.vector.pos.trtsp) #because of a bug in nullp()
+GO.out.pos.trtsp <- goseq(pwf = nullp.result.pos.trtsp, gene2cat = go.list.pos.trtsp,test.cats=("GO:BP"))
+
+
+GO.out.pos.trtsp[GO.out.pos.trtsp$over_represented_pvalue < 0.05,]
+write.table(GO.out.pos.trtsp[GO.out.pos.trtsp$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="GO_termspositive3.txt", quote = FALSE,col.names = FALSE)
+
+```
+ 
+This is the end of the positive interaction GO analysis
+
+This is the beggining of the negative trt GO analysis
+
+```{r}
+negative_values.trt <- DEgene.trtL %>%
+  filter(logFC < 0)
+negative_values.trt
+
+positive_values.trt <- DEgene.trtL %>%
+  filter(logFC > 0)
+positive_values.trt
+```
+
+```{r}
+trtneg.trt <- negative_values.trt %>%
+  rownames_to_column()
+colnames(trtneg.trt) <- str_replace(colnames(trtneg.trt), fixed("rowname"), "GeneID")
+
+file.info.neg.trt <- read_tsv("Sdiv2Athal.blastp_20210714.out", col_names = FALSE)
+colnames(file.info.neg.trt)[1] <- "GeneID"
+colnames(file.info.neg.trt)[2] <- "GOTerms"
+file.info.neg.trt
+uniq.blast.results.neg.trt <- file.info.neg.trt %>%
+    group_by(GeneID) %>%
+    filter(rank(dplyr::desc(X12), ties.method = "first") == 1) 
+uniq.blast.results.neg.trt
+
+
+GODEgene.neg.trt <- inner_join(trtneg.trt, uniq.blast.results.neg.trt)
+GODEgene.neg.trt
+```
+ 
+```{r}
+go.terms.neg.trt <- read_tsv("Sdiv_GoTerms.tsv")
+go.terms.neg.trt
+
+expressed.genes.neg.trt <- M_K3[, 1, drop = F ]
+expressed.genes.neg.trt
+
+
+txdb.neg.trt <- makeTxDbFromGFF("streptanthus_jamg.gene_structures_post_PASA_updates.97994.gff3")
+# then collect the exons per gene id
+exons.list.per.gene.neg.trt <- exonsBy(txdb.neg.trt,by="gene")
+# then for each gene, reduce all the exons to a set of non overlapping exons, calculate their lengths (widths) and sum then
+exonic.gene.sizes.neg.trt <- sum(width(reduce(exons.list.per.gene.neg.trt)))
+genething.neg.trt <- data.frame(as.data.frame(exonic.gene.sizes.neg.trt))
+gene.length.neg.trt <- genething.neg.trt %>%
+  rownames_to_column()
+colnames(gene.length.neg.trt) <- str_replace(colnames(gene.length.neg.trt), fixed("rowname"), ("Gene_ID"))
+colnames(gene.length.neg.trt) <- str_replace(colnames(gene.length.neg.trt), fixed("exonic.gene.sizes.neg"), ("Length"))
+gene.length.neg.trt <- gene.length.neg.trt %>%
+  mutate(Gene_ID=str_replace(Gene_ID, "TU", "model"))
+
+
+gene.lengths.vector.neg.trt <- gene.length.neg.trt$Length[gene.length.neg.trt$Gene_ID %in% expressed.genes.neg.trt$Gene_ID]
+gene.lengths.vector.neg.trt
+names(gene.lengths.vector.neg.trt) <- gene.length.neg.trt$Gene_ID[gene.length.neg.trt$Gene_ID %in% expressed.genes.neg.trt$Gene_ID]
+head(gene.lengths.vector.neg.trt)
+expressed.genes.match.neg.trt <- expressed.genes.neg.trt[expressed.genes.neg.trt$Gene_ID %in% names(gene.lengths.vector.neg.trt),, drop = F]
+expressed.genes.match.neg.trt
+```
+ 
+```{r}
+go.list.neg.trt <- strsplit(go.terms.neg.trt$GOs, split=", ")
+names(go.list.neg.trt) <- go.terms.neg.trt$GeneID
+head(go.list.neg.trt)
+```
+ 
+```{r}
+DE.trt.neg <- expressed.genes.match.neg.trt$Gene_ID %in% trtneg.trt$GeneID
+names(DE.trt.neg) <- expressed.genes.match.neg.trt$Gene_ID
+head(DE.trt.neg)
+DE.trt.neg <- as.numeric(DE.trt.neg) 
+DE.trt.neg
+sum(DE.trt.neg) 
+```
+```{r}
+nullp.result.neg.trt <- nullp(DEgenes = DE.trt.neg,bias.data = gene.lengths.vector.neg.trt)
+
+rownames(nullp.result.neg.trt) <- names(gene.lengths.vector.neg.trt) #because of a bug in nullp()
+GO.out.neg.trt <- goseq(pwf = nullp.result.neg.trt, gene2cat = go.list.neg.trt,test.cats=("GO:BP"))
+
+
+GO.out.neg.trt[GO.out.neg.trt$over_represented_pvalue < 0.05,]
+write.table(GO.out.neg.trt[GO.out.neg.trt$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="GO_termsNegative4trt.txt", quote = FALSE,col.names = FALSE)
+
+```
+End of the negative treatment GO analysis
+
+Beginning of the Positive treatment GO analysis
+
+```{r}
+trtpos.trt <- positive_values.trt %>%
+  rownames_to_column()
+colnames(trtpos.trt) <- str_replace(colnames(trtpos.trt), fixed("rowname"), "GeneID")
+
+file.info.pos.trt <- read_tsv("Sdiv2Athal.blastp_20210714.out", col_names = FALSE)
+colnames(file.info.pos.trt)[1] <- "GeneID"
+colnames(file.info.pos.trt)[2] <- "GOTerms"
+file.info.pos.trt
+uniq.blast.results.pos.trt <- file.info.pos.trt %>%
+    group_by(GeneID) %>%
+    filter(rank(dplyr::desc(X12), ties.method = "first") == 1) 
+uniq.blast.results.pos.trt
+
+
+GODEgene.pos.trt <- inner_join(trtpos.trt, uniq.blast.results.pos.trt)
+GODEgene.pos.trt
+```
+
+```{r}
+go.terms.pos.trt <- read_tsv("Sdiv_GoTerms.tsv")
+go.terms.pos.trt
+
+expressed.genes.pos.trt <- M_K3[, 1, drop = F ]
+expressed.genes.pos.trt
+
+
+txdb.pos.trt <- makeTxDbFromGFF("streptanthus_jamg.gene_structures_post_PASA_updates.97994.gff3")
+# then collect the exons per gene id
+exons.list.per.gene.pos.trt <- exonsBy(txdb.pos.trt,by="gene")
+# then for each gene, reduce all the exons to a set of non overlapping exons, calculate their lengths (widths) and sum then
+exonic.gene.sizes.pos.trt <- sum(width(reduce(exons.list.per.gene.pos.trt)))
+genething.pos.trt <- data.frame(as.data.frame(exonic.gene.sizes.pos.trt))
+gene.length.pos.trt <- genething.pos.trt %>%
+  rownames_to_column()
+colnames(gene.length.pos.trt) <- str_replace(colnames(gene.length.pos.trt), fixed("rowname"), ("Gene_ID"))
+colnames(gene.length.pos.trt) <- str_replace(colnames(gene.length.pos.trt), fixed("exonic.gene.sizes.neg"), ("Length"))
+gene.length.pos.trt <- gene.length.pos.trt %>%
+  mutate(Gene_ID=str_replace(Gene_ID, "TU", "model"))
+gene.length.pos.trt
+
+gene.lengths.vector.pos.trt <- gene.length.pos.trt$exonic.gene.sizes.pos.trt[gene.length.pos.trt$Gene_ID %in% expressed.genes.pos.trt$Gene_ID]
+gene.lengths.vector.pos.trt
+names(gene.lengths.vector.pos.trt) <- gene.length.pos.trt$Gene_ID[gene.length.pos.trt$Gene_ID %in% expressed.genes.pos.trt$Gene_ID]
+head(gene.lengths.vector.pos.trt)
+expressed.genes.match.pos.trt <- expressed.genes.pos.trt[expressed.genes.pos.trt$Gene_ID %in% names(gene.lengths.vector.pos.trt),, drop = F]
+expressed.genes.match.pos.trt
+```
+
+```{r}
+go.list.pos.trt <- strsplit(go.terms.pos.trt$GOs, split=", ")
+names(go.list.pos.trt) <- go.terms.pos.trt$GeneID
+head(go.list.pos.trt)
+```
+
+```{r}
+DE.trt.pos <- expressed.genes.match.pos.trt$Gene_ID %in% trtpos.trt$GeneID
+names(DE.trt.pos) <- expressed.genes.match.pos.trt$Gene_ID
+head(DE.trt.pos)
+DE.trt.pos <- as.numeric(DE.trt.pos) 
+DE.trt.pos
+sum(DE.trt.pos) 
+```
+
+```{r}
+nullp.result.pos.trt <- nullp(DEgenes = DE.trt.pos,bias.data = gene.lengths.vector.pos.trt)
+
+rownames(nullp.result.pos.trt) <- names(gene.lengths.vector.pos.trt) #because of a bug in nullp()
+GO.out.pos.trt <- goseq(pwf = nullp.result.pos.trt, gene2cat = go.list.pos.trt,test.cats=("GO:BP"))
+
+
+GO.out.pos.trt[GO.out.pos.trt$over_represented_pvalue < 0.05,]
+write.table(GO.out.pos.trt[GO.out.pos.trt$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="GO_termsPositive4trt.txt", quote = FALSE,col.names = FALSE)
+```
+End of positive treatment GO analysis
